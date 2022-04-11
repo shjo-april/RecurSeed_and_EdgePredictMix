@@ -1,0 +1,157 @@
+{
+	"class_names": [
+		"background",
+		"aeroplane",
+		"bicycle",
+		"bird",
+		"boat",
+		"bottle",
+		"bus",
+		"car",
+		"cat",
+		"chair",
+		"cow",
+		"diningtable",
+		"dog",
+		"horse",
+		"motorbike",
+		"person",
+		"pottedplant",
+		"sheep",
+		"sofa",
+		"train",
+		"tvmonitor"
+	],
+	"class_dict": {
+		"background": 0,
+		"aeroplane": 1,
+		"bicycle": 2,
+		"bird": 3,
+		"boat": 4,
+		"bottle": 5,
+		"bus": 6,
+		"car": 7,
+		"cat": 8,
+		"chair": 9,
+		"cow": 10,
+		"diningtable": 11,
+		"dog": 12,
+		"horse": 13,
+		"motorbike": 14,
+		"person": 15,
+		"pottedplant": 16,
+		"sheep": 17,
+		"sofa": 18,
+		"train": 19,
+		"tvmonitor": 20
+	},
+	"color_dict": {
+		"background": [
+			0,
+			0,
+			0
+		],
+		"aeroplane": [
+			128,
+			0,
+			0
+		],
+		"bicycle": [
+			0,
+			128,
+			0
+		],
+		"bird": [
+			128,
+			128,
+			0
+		],
+		"boat": [
+			0,
+			0,
+			128
+		],
+		"bottle": [
+			128,
+			0,
+			128
+		],
+		"bus": [
+			0,
+			128,
+			128
+		],
+		"car": [
+			128,
+			128,
+			128
+		],
+		"cat": [
+			64,
+			0,
+			0
+		],
+		"chair": [
+			192,
+			0,
+			0
+		],
+		"cow": [
+			64,
+			128,
+			0
+		],
+		"diningtable": [
+			192,
+			128,
+			0
+		],
+		"dog": [
+			64,
+			0,
+			128
+		],
+		"horse": [
+			192,
+			0,
+			128
+		],
+		"motorbike": [
+			64,
+			128,
+			128
+		],
+		"person": [
+			192,
+			128,
+			128
+		],
+		"pottedplant": [
+			0,
+			64,
+			0
+		],
+		"sheep": [
+			128,
+			64,
+			0
+		],
+		"sofa": [
+			0,
+			192,
+			0
+		],
+		"train": [
+			128,
+			192,
+			0
+		],
+		"tvmonitor": [
+			0,
+			64,
+			128
+		]
+	},
+	"num_classes": 21,
+	"ignore_index": 255
+}
