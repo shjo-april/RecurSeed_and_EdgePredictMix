@@ -1,5 +1,14 @@
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/recurseed-and-certainmix-for-weakly/weakly-supervised-semantic-segmentation-on-1)](https://paperswithcode.com/sota/weakly-supervised-semantic-segmentation-on-1?p=recurseed-and-certainmix-for-weakly)
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/recurseed-and-certainmix-for-weakly/weakly-supervised-semantic-segmentation-on)](https://paperswithcode.com/sota/weakly-supervised-semantic-segmentation-on?p=recurseed-and-certainmix-for-weakly)
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/recurseed-and-certainmix-for-weakly/weakly-supervised-semantic-segmentation-on-4)](https://paperswithcode.com/sota/weakly-supervised-semantic-segmentation-on-4?p=recurseed-and-certainmix-for-weakly)
+
 # RecurSeed and CertainMix
 This repository is the official implementation of "RecurSeed and CertainMix for Weakly Supervised Semantic Segmentation". Please feel free to reach out for any questions or discussions.
+
+# Citation
+- Please cite our paper if the code is helpful to your research. [arxiv](https://arxiv.org/abs/2204.06754)
+```
+```
 
 ### Abstract
 Although weakly supervised semantic segmentation using only image-level labels (WSSS-IL) is potentially useful, its low performance and implementation complexity still limit its use. The main causes are (a) non-detection and (b) false-detection phenomena: (a) The class activation maps refined from existing WSSS-IL methods still only represent partial regions for large-scale objects, (b) and for small-scale objects, over-activations cause them to deviate from the object edges. We propose RecurSeed which alternately reduces non- and false-detections through recursive iterations, thereby implicitly finding an optimal junction minimizing both errors. To maximize the effectiveness of RecurSeed, we also propose a novel data augmentation (DA)  approach called CertainMix, which virtually creates object masks and expresses their edges in more detail by combining the segmentation results, thereby achieving a DA more spatially matching the ground-truth masks. We achieved new state-of-the-art performances on both the PASCAL VOC 2012 and MS COCO 2014 benchmarks (VOC \emph{val}: $72.4\%$, COCO \emph{val}: $45.0\%$).
@@ -69,7 +78,7 @@ Create a directory "../VOC2012/" for storing the dataset and appropriately place
 We prepared [a jupyter notebook](https://github.com/OFRIN/RecurSeed_and_CertainMix/blob/master/demo.ipynb) for visualization.
 
 # Training
-The whole code and commands are under internal review and will release soon.
+The whole code and commands are under review and will release soon.
 
 # Evaluation
 Release our weights, official results, and final masks through our methods.
@@ -80,6 +89,3 @@ Release our weights, official results, and final masks through our methods.
 | multi-stage | DeepLabv2 | [weight](https://drive.google.com/file/d/1KtIGxmqf3FeIETs-rc3hE9pUygcKpeNI/view?usp=sharing) | [link](http://host.robots.ox.ac.uk:8080/anonymous/GETYD6.html) [mask](https://drive.google.com/file/d/1ldTWo2VtFH2jLG5Zip7ZFnZZjJHNCOho/view?usp=sharing) | [link](http://host.robots.ox.ac.uk:8080/anonymous/ZEOASL.html) [mask](https://drive.google.com/file/d/11h9kHfTpTY97Kl0DJ0U6SINgH3bDCKHt/view?usp=sharing) |
 | multi-stage | DeepLabv3+ | [weight](https://drive.google.com/file/d/1KtIGxmqf3FeIETs-rc3hE9pUygcKpeNI/view?usp=sharing) | [link](http://host.robots.ox.ac.uk:8080/anonymous/2XIMJS.html) [mask](https://drive.google.com/file/d/1HZyuZpfREhmALwy9T1dFZJUq1KANc1u3/view?usp=sharing) | [link](http://host.robots.ox.ac.uk:8080/anonymous/4QJDCS.html) [mask](https://drive.google.com/file/d/1I_mftMmXdC8ZFFBOmAaSju9j9vSvlDk8/view?usp=sharing) |
 
-# Citation
-```
-```
