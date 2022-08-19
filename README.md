@@ -18,6 +18,7 @@ Although weakly-supervised semantic segmentation using only image-level labels (
 # Update
 
 [04/14/2022] Released "RecurSeed and CertainMix" for testing.
+
 [08/19/2022] Released "RecurSeed and EdgePredictMix" for testing.
 
 # Setup
