@@ -1,4 +1,4 @@
-# Copyright (C) 2021 * Ltd. All rights reserved.
+# Copyright (C) 2022 * Ltd. All rights reserved.
 # author : Sanghyun Jo <shjo.april@gmail.com>
 
 import xml.etree.ElementTree as ET
@@ -36,6 +36,7 @@ def read_xml(xml_path, keep_difficult=False):
     
     return bboxes, classes
 
+# TODO: refine
 def write_xml(xml_path, tags, image_shape):
     h, w, c = image_shape
 

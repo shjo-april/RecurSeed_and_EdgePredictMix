@@ -1,4 +1,4 @@
-# Copyright (C) 2021 * Ltd. All rights reserved.
+# Copyright (C) 2022 * Ltd. All rights reserved.
 # author : Sanghyun Jo <shjo.april@gmail.com>
 
 import torch.utils.model_zoo as model_zoo

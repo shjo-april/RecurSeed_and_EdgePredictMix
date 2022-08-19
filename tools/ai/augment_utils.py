@@ -1,15 +1,66 @@
-# Copyright (C) 2021 * Ltd. All rights reserved.
+# Copyright (C) 2022 * Ltd. All rights reserved.
 # author : Sanghyun Jo <shjo.april@gmail.com>
 
 import cv2
+import torch
 import random
 import numpy as np
 
 from PIL import Image
+from PIL import ImageFilter
 from PIL import ImageOps
 from PIL import ImageEnhance
 
 from torchvision import transforms
+
+IMAGENET_MEAN = [0.485, 0.456, 0.406]
+IMAGENET_STD = [0.229, 0.224, 0.225]
+
+def get_transform(args):
+    augment_dict = {
+        'resize':Resize(args.image_size),
+        'minmax_scale':Random_Rescale(args.min_scale, args.max_scale),
+        'minmax_resize':Random_Resize(args.min_image_size, args.max_image_size),
+        
+        'hflip':Random_HFlip(),
+        'blur':Random_GaussianBlur(p=0.5, kernel=(5, 5)),
+        'gray':Random_Grayscale(p=0.2),
+        'rotation': Random_Rotation(degree=10),
+        
+        'colorjitter':ColorJitter(brightness=args.b_factor, contrast=args.c_factor, saturation=args.s_factor, hue=args.h_factor),
+        
+        'normalize':Normalize(IMAGENET_MEAN, IMAGENET_STD),
+        'transpose':Transpose(),
+        
+        'random_crop':Random_Crop(args.image_size),
+        'center_crop':Center_Crop(args.image_size),
+
+        'click2mask': Clicks2Mask(ignore_index=255, zoom_factor=args.zoom_factor),
+        'maskresize': Resize_For_Mask(args.image_size // 4)
+    }
+
+    train_transforms = []
+    for name in args.train_augment.split('-'):
+        if name in augment_dict.keys():
+            transform = augment_dict[name]
+        else:
+            raise ValueError('unrecognize name of transform ({})'.format(name))
+        
+        train_transforms.append(transform)
+
+    test_transforms = []
+    for name in args.test_augment.split('-'):
+        if name in augment_dict.keys():
+            transform = augment_dict[name]
+        else:
+            raise ValueError('unrecognize name of transform ({})'.format(name))
+        
+        test_transforms.append(transform)
+
+    train_transform = Compose(train_transforms)
+    test_transform = Compose(test_transforms)
+
+    return train_transform, test_transform
 
 class Compose:
     def __init__(self, transforms):
@@ -27,8 +78,34 @@ class Compose:
         text += ')'
         return text
 
+class Fixed_Resize:
+    def __init__(self, image_size: tuple):
+        self.image_size = image_size
+        
+        self.key_dict = {
+            'image': Image.BICUBIC, 
+            'mask': Image.NEAREST
+        }
+    
+    def resize(self, image, mode):
+        return image.resize(self.image_size, mode)
+    
+    def __call__(self, output_dict):
+        image, mask = output_dict['image'], output_dict['mask']
+
+        image = self.resize(image, self.key_dict['image'])
+        if mask is not None:
+            mask = self.resize(mask, self.key_dict['mask'])
+    
+        output_dict['image'], output_dict['mask'] = image, mask
+        return output_dict
+
+    def __repr__(self):
+        return 'Fixed_Resize (image_size={})'.format(self.image_size)
+
 class Conditional_Resize:
-    def __init__(self, max_image_size=512):
+    def __init__(self, max_image_size=512, with_mask=True):
+        self.with_mask = with_mask
         self.max_image_size = max_image_size
         
         self.key_dict = {
@@ -61,7 +138,7 @@ class Conditional_Resize:
             size = self.max_image_size
 
             image = self.resize(image, size, self.key_dict['image'])
-            if mask is not None:
+            if mask is not None and self.with_mask:
                 mask = self.resize(mask, size, self.key_dict['mask'])
         
         output_dict['image'], output_dict['mask'] = image, mask
@@ -113,6 +190,43 @@ class Resize:
     def __repr__(self):
         return 'Resize (image_size={})'.format(self.max_image_size)
 
+class Random_Rotation:
+    def __init__(self, degree=10, p=0.5, ignore_index=255, mean=[0.485, 0.456, 0.406]):
+        self.p = p
+        self.degree = degree
+        self.ignore_index = ignore_index
+
+        self.key_dict = {
+            'image': Image.BICUBIC, 
+            'mask': Image.NEAREST,
+            'uncertain_mask': Image.BILINEAR
+        }
+
+        self.fill_dict = {
+            'image': tuple([int(m * 255) for m in mean]),
+            'mask': self.ignore_index,
+            'uncertain_mask': (1 * 255)
+        }
+
+    def __call__(self, output_dict):
+        if np.random.rand() <= self.p:
+            deg = np.random.randint(-self.degree, self.degree+1, 1)[0]
+            
+            for key in output_dict.keys():
+                # print(key, output_dict[key])
+                if key == 'clicks':
+                    continue
+
+                if key in self.fill_dict:
+                    output_dict[key] = output_dict[key].rotate(deg, self.key_dict[key], fillcolor=self.fill_dict[key])
+                else:
+                    output_dict[key] = output_dict[key].rotate(deg, Image.BILINEAR, fillcolor=0)
+        
+        return output_dict
+
+    def __repr__(self):
+        return 'Random_Rotation (degree={})'.format(self.degree)
+
 class Random_Resize:
     def __init__(self, min_image_size, max_image_size, full=False):
         self.min_image_size = min_image_size
@@ -145,17 +259,17 @@ class Random_Resize:
             return image
         else:
             return image.resize(size, mode)
-    
+
     def __call__(self, output_dict):
         image, mask = output_dict['image'], output_dict['mask']
 
         size = self.get_image_size()
 
-        image = self.resize(image, size, self.key_dict['image'])
+        resized_image = self.resize(image, size, self.key_dict['image'])
         if mask is not None:
             mask = self.resize(mask, size, self.key_dict['mask'])
         
-        output_dict['image'], output_dict['mask'] = image, mask
+        output_dict['image'], output_dict['mask'] = resized_image, mask
         return output_dict
 
     def __repr__(self):
@@ -168,7 +282,8 @@ class Random_Rescale:
         
         self.key_dict = {
             'image': Image.BICUBIC, 
-            'mask': Image.NEAREST
+            'mask': Image.NEAREST,
+            'uncertain_mask': Image.BILINEAR,
         }
 
     def get_scale(self):
@@ -184,15 +299,18 @@ class Random_Rescale:
             return image.resize(size, mode)
     
     def __call__(self, output_dict):
-        image, mask = output_dict['image'], output_dict['mask']
-
         scale = self.get_scale()
 
-        image = self.resize(image, scale, self.key_dict['image'])
-        if mask is not None:
-            mask = self.resize(mask, scale, self.key_dict['mask'])
+        for key in output_dict.keys():
+            if output_dict[key] is not None:
+                if key == 'clicks':
+                    continue
+
+                if key in self.key_dict:
+                    output_dict[key] = self.resize(output_dict[key], scale, self.key_dict[key])
+                else:
+                    output_dict[key] = self.resize(output_dict[key], scale, Image.BILINEAR)
         
-        output_dict['image'], output_dict['mask'] = image, mask
         return output_dict
 
     def __repr__(self):
@@ -203,14 +321,17 @@ class Random_HFlip:
         self.p = p
     
     def __call__(self, output_dict):
-        image, mask = output_dict['image'], output_dict['mask']
-
         if np.random.rand() <= self.p:
-            image = image.transpose(Image.FLIP_LEFT_RIGHT)
-            if mask is not None:
-                mask = mask.transpose(Image.FLIP_LEFT_RIGHT)
-        
-        output_dict['image'], output_dict['mask'] = image, mask
+            for key in output_dict.keys():
+                if key == 'clicks':
+                    clicks = output_dict['clicks']
+                    for click in clicks:
+                        click['x'] = 1. - click['x']    
+                    output_dict['clicks'] = clicks
+
+                elif output_dict[key] is not None:
+                    output_dict[key] = output_dict[key].transpose(Image.FLIP_LEFT_RIGHT)
+
         return output_dict
 
     def __repr__(self):
@@ -237,6 +358,10 @@ class Normalize:
         if mask is not None:
             mask = np.asarray(mask, dtype=np.int64)
 
+        for key in output_dict.keys():
+            if not key in ['image', 'mask', 'clicks']:
+                output_dict[key] = np.asarray(output_dict[key], dtype=np.float32) # / 255
+
         output_dict['image'], output_dict['mask'] = norm_image, mask
         return output_dict
 
@@ -257,6 +382,14 @@ class Denormalize:
         image = (image * self.std) + self.mean
         image = (image * 255).astype(np.uint8)
 
+        return image
+
+    def to(self, image, device=torch.device('cuda')):
+        mean = torch.Tensor(self.mean).float().to(device)
+        std = torch.Tensor(self.std).float().to(device)
+
+        image = image * std[:, None, None] + mean[:, None, None]
+        # print(image.shape, image.min(), image.max())
         return image
 
     def __repr__(self):
@@ -281,22 +414,45 @@ class ColorJitter(transforms.ColorJitter):
         output_dict['image'] = super().__call__(output_dict['image'])
         return output_dict
 
+class Random_Grayscale(transforms.RandomGrayscale):
+    def __init__(self, p=0.2):
+        super().__init__(p)
+
+    def __call__(self, output_dict):
+        output_dict['image'] = super().__call__(output_dict['image'])
+        return output_dict
+
+class Random_GaussianBlur(transforms.GaussianBlur):
+    def __init__(self, p=0.5, kernel=(5, 5)):
+        super().__init__(kernel)
+        self.p = p
+
+    def __call__(self, output_dict):
+        if np.random.rand() <= self.p:
+            output_dict['image'] = super().__call__(output_dict['image'])
+        return output_dict
+
 class Random_Crop:
     def __init__(self, size, channels=3, bg_image=0, bg_mask=255):
         self.bg_image = bg_image
         self.bg_mask = bg_mask
 
-        self.size = size
-        self.shape = (size, size, channels)
+        if isinstance(size, int):
+            self.w_size = size
+            self.h_size = size
+        elif isinstance(size, tuple):
+            self.w_size, self.h_size = size
+
+        self.shape = (self.h_size, self.w_size, channels)
 
     def get_random_crop_box(self, image):
         h, w, _ = image.shape
         
-        crop_h = min(self.size, h)
-        crop_w = min(self.size, w)
+        crop_h = min(self.h_size, h)
+        crop_w = min(self.w_size, w)
 
-        w_space = w - self.size
-        h_space = h - self.size
+        w_space = w - self.w_size
+        h_space = h - self.h_size
 
         if w_space > 0:
             cont_left = 0
@@ -333,7 +489,88 @@ class Random_Crop:
             image[src_bbox['ymin']:src_bbox['ymax'], src_bbox['xmin']:src_bbox['xmax']]
         
         if mask is not None:
-            cropped_mask = np.ones(self.shape[:2], image.dtype) * self.bg_mask
+            cropped_mask = np.ones(self.shape[:2], mask.dtype) * self.bg_mask
+            cropped_mask[dst_bbox['ymin']:dst_bbox['ymax'], dst_bbox['xmin']:dst_bbox['xmax']] = \
+                mask[src_bbox['ymin']:src_bbox['ymax'], src_bbox['xmin']:src_bbox['xmax']]
+        else:
+            cropped_mask = None
+
+        if 'uncertain_mask' in output_dict:
+            umask = output_dict['uncertain_mask']
+            cropped_umask = np.zeros(self.shape[:2], umask.dtype)
+            cropped_umask[dst_bbox['ymin']:dst_bbox['ymax'], dst_bbox['xmin']:dst_bbox['xmax']] = \
+                umask[src_bbox['ymin']:src_bbox['ymax'], src_bbox['xmin']:src_bbox['xmax']]
+            output_dict['uncertain_mask'] = cropped_umask
+
+        for key in output_dict.keys():
+            if not key in ['image', 'mask', 'uncertain_mask', 'clicks']:
+                tmask = output_dict[key]
+
+                cropped_tmask = np.zeros(self.shape[:2], umask.dtype)
+                cropped_tmask[dst_bbox['ymin']:dst_bbox['ymax'], dst_bbox['xmin']:dst_bbox['xmax']] = \
+                    tmask[src_bbox['ymin']:src_bbox['ymax'], src_bbox['xmin']:src_bbox['xmax']]
+                
+                output_dict[key] = cropped_tmask
+
+        output_dict['image'] = cropped_image
+        output_dict['mask'] = cropped_mask
+        output_dict['crop_bbox'] = [dst_bbox['xmin'], dst_bbox['ymin'], dst_bbox['xmax'], dst_bbox['ymax']]
+
+        return output_dict
+
+    def __repr__(self):
+        return 'Random_Crop (size={})'.format((self.w_size, self.h_size))
+
+class Center_Crop:
+    def __init__(self, size, channels=3, bg_image=0, bg_mask=255):
+        self.bg_image = bg_image
+        self.bg_mask = bg_mask
+
+        if isinstance(size, int):
+            self.w_size = size
+            self.h_size = size
+        elif isinstance(size, tuple):
+            self.w_size, self.h_size = size
+
+        self.shape = (self.h_size, self.w_size, channels)
+
+    def get_center_box(self, image):
+        h, w, _ = image.shape
+        
+        crop_h = min(self.h_size, h)
+        crop_w = min(self.w_size, w)
+
+        dst_xmin = self.w_size // 2 - crop_w // 2
+        dst_ymin = self.h_size // 2 - crop_h // 2
+
+        src_xmin = w // 2 - crop_w // 2
+        src_ymin = h // 2 - crop_h // 2
+
+        # print(src_xmin, src_ymin)
+        # print(dst_xmin, dst_ymin)
+        
+        dst_bbox = {
+            'xmin' : dst_xmin, 'ymin' : dst_ymin,
+            'xmax' : dst_xmin+crop_w, 'ymax' : dst_ymin+crop_h
+        }
+        src_bbox = {
+            'xmin' : src_xmin, 'ymin' : src_ymin,
+            'xmax' : src_xmin+crop_w, 'ymax' : src_ymin+crop_h
+        }
+
+        return src_bbox, dst_bbox
+    
+    def __call__(self, output_dict):
+        image, mask = output_dict['image'], output_dict['mask']
+
+        src_bbox, dst_bbox = self.get_center_box(image)
+        
+        cropped_image = np.ones(self.shape, image.dtype) * self.bg_image
+        cropped_image[dst_bbox['ymin']:dst_bbox['ymax'], dst_bbox['xmin']:dst_bbox['xmax']] = \
+            image[src_bbox['ymin']:src_bbox['ymax'], src_bbox['xmin']:src_bbox['xmax']]
+        
+        if mask is not None:
+            cropped_mask = np.ones(self.shape[:2], mask.dtype) * self.bg_mask
             cropped_mask[dst_bbox['ymin']:dst_bbox['ymax'], dst_bbox['xmin']:dst_bbox['xmax']] = \
                 mask[src_bbox['ymin']:src_bbox['ymax'], src_bbox['xmin']:src_bbox['xmax']]
         else:
@@ -346,7 +583,7 @@ class Random_Crop:
         return output_dict
 
     def __repr__(self):
-        return 'RandomCrop (size={})'.format(self.size)
+        return 'CenterCrop (size={})'.format((self.w_size, self.h_size))
 
 class Resize_For_Mask:
     def __init__(self, size):
@@ -365,298 +602,32 @@ class Resize_For_Mask:
     def __repr__(self):
         return 'Resize For Mask ({})'.format(self.size)
 
-##################################################################
-# Photometric Transformations
-##################################################################
-class AutoContrast:
-    def __init__(self, p=0.5):
-        self.p = p
-    
-    def __call__(self, image, mask=None):
-        if np.random.rand() <= self.p:
-            image = ImageOps.autocontrast(image)
-        return image, mask
+class Clicks2Mask:
+    def __init__(self, ignore_index, zoom_factor=1):
+        self.ignore_index = ignore_index
+        self.zoom_factor = zoom_factor
 
-    def __repr__(self):
-        return 'AutoContrast (p={})'.format(self.p)
+    def __call__(self, output_dict):
+        w, h = output_dict['image'].size
+        rw, rh = w // self.zoom_factor, h // self.zoom_factor
 
-class Equalize:
-    def __init__(self, p=0.5):
-        self.p = p
-    
-    def __call__(self, image, mask=None):
-        if np.random.rand() <= self.p:
-            image = ImageOps.equalize(image)
-        return image, mask
-
-    def __repr__(self):
-        return 'Equalize (p={})'.format(self.p)
-
-class Invert:
-    def __init__(self, p=0.5):
-        self.p = p
-    
-    def __call__(self, image, mask=None):
-        if np.random.rand() <= self.p:
-            image = ImageOps.invert(image)
-        return image, mask
-
-    def __repr__(self):
-        return 'Invert (p={})'.format(self.p)
-
-class Posterize:
-    def __init__(self, p=0.5, max_v=4, fix=False):
-        self.p = p
-
-        self.min_v = max_v if fix else 1
-        self.max_v = max_v
-    
-    def __call__(self, image, mask=None):
-        if np.random.rand() <= self.p:
-            v = np.random.randint(self.min_v, self.max_v + 1)
-            v = max(v, 2)
-            image = ImageOps.posterize(image, v)
-        return image, mask
-
-    def __repr__(self):
-        return 'Posterize (p={})'.format(self.p)
-
-class Solarize:
-    def __init__(self, p=0.5, max_v=256, fix=False):
-        self.p = p
-
-        self.min_v = max_v if fix else 0
-        self.max_v = max_v
-    
-    def __call__(self, image, mask=None):
-        if np.random.rand() <= self.p:
-            v = np.random.randint(self.min_v, self.max_v + 1)
-            image = ImageOps.solarize(image, v)
-        return image, mask
-
-    def __repr__(self):
-        return 'Solarize (p={})'.format(self.p)
-
-class SolarizeAdd:
-    def __init__(self, p=0.5, v=128, max_addition=110, fix=False):
-        self.p = p
-
-        self.v = v
-
-        self.min_addition = max_addition if fix else 0
-        self.max_addition = max_addition
-    
-    def __call__(self, image, mask=None):
-        if np.random.rand() <= self.p:
-            addition = np.random.randint(self.min_addition, self.max_addition + 1)
-
-            np_image = np.array(image).astype(np.int32)
-
-            np_image = np_image + addition
-            np_image = np.clip(np_image, 0, 255)
-            np_image = np_image.astype(np.uint8)
-
-            image = Image.fromarray(np_image)
-            image = ImageOps.solarize(image, self.v)
+        click_mask = np.ones((rh, rw), dtype=np.uint8) 
+        click_mask *= self.ignore_index
         
-        return image, mask
+        for click in output_dict['clicks']:
+            y, x = click['y'], click['x']
 
-    def __repr__(self):
-        return 'SolarizeAdd (p={})'.format(self.p)
-
-class Color:
-    def __init__(self, p=0.5, max_v=1.9, fix=False):
-        self.p = p
-
-        self.min_v = max_v if fix else 0.1
-        self.max_v = max_v
-    
-    def __call__(self, image, mask=None):
-        if np.random.rand() <= self.p:
-            v = np.random.uniform(self.min_v, self.max_v)
-            image = ImageEnhance.Color(image).enhance(v)
-        return image, mask
-
-    def __repr__(self):
-        return 'Color (p={})'.format(self.p)
-
-class Contrast:
-    def __init__(self, p=0.5, max_v=1.9, fix=False):
-        self.p = p
-
-        self.min_v = max_v if fix else 0.1
-        self.max_v = max_v
-    
-    def __call__(self, image, mask=None):
-        if np.random.rand() <= self.p:
-            v = np.random.uniform(self.min_v, self.max_v)
-            image = ImageEnhance.Contrast(image).enhance(v)
-        return image, mask
-
-    def __repr__(self):
-        return 'Contrast (p={})'.format(self.p)
-
-class Brightness:
-    def __init__(self, p=0.5, max_v=1.9, fix=False):
-        self.p = p
-
-        self.min_v = max_v if fix else 0.1
-        self.max_v = max_v
-    
-    def __call__(self, image, mask=None):
-        if np.random.rand() <= self.p:
-            v = np.random.uniform(self.min_v, self.max_v)
-            image = ImageEnhance.Brightness(image).enhance(v)
-        return image, mask
-
-    def __repr__(self):
-        return 'Brightness (p={})'.format(self.p)
-
-class Sharpness:
-    def __init__(self, p=0.5, max_v=1.9, fix=False):
-        self.p = p
-
-        self.min_v = max_v if fix else 0.1
-        self.max_v = max_v
-    
-    def __call__(self, image, mask=None):
-        if np.random.rand() <= self.p:
-            v = np.random.uniform(self.min_v, self.max_v)
-            image = ImageEnhance.Sharpness(image).enhance(v)
-        return image, mask
-
-    def __repr__(self):
-        return 'Sharpness (p={})'.format(self.p)
-
-class Photometric_Transform:
-    def __init__(self, num_augments=2, magnitude=9):
-        self.n = num_augments
-        self.m = magnitude
-
-        self.colorjitter = ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.25)
-
-        self.ops = [
-            AutoContrast(p=1.0),
-            Equalize(p=1.0),
-            Invert(p=1.0),
-
-            Posterize(p=1.0, max_v=(self.m / 30.) * 4., fix=True),
-            Solarize(p=1.0, max_v=(self.m / 30.) * 256, fix=True),
-            SolarizeAdd(p=1.0, max_addition=(self.m / 30.) * 110, fix=True),
-
-            Color(p=1.0, max_v=(self.m / 30.) * 1.8 + 0.1, fix=True),
-            Contrast(p=1.0, max_v=(self.m / 30.) * 1.8 + 0.1, fix=True),
-            Brightness(p=1.0, max_v=(self.m / 30.) * 1.8 + 0.1, fix=True),
-            Sharpness(p=1.0, max_v=(self.m / 30.) * 1.8 + 0.1, fix=True),
-        ]
-
-    def __call__(self, image):
-        image, _ = self.colorjitter(image)
-
-        for op in random.choices(self.ops):
-            image, _ = op(image)
-
-        return image
-
-##################################################################
-# Geometric Transformations
-##################################################################
-class Rotate:
-    def __init__(self, p=0.5, max_angle=30, fix=False):
-        self.p = p
-
-        self.min_angle = max_angle if fix else 0
-        self.max_angle = max_angle
-    
-    def __call__(self, image, mask=None):
-        if np.random.rand() <= self.p:
-
-            v = np.random.randint(self.min_angle, self.max_angle + 1)
-            if np.random.rand() <= 0.5:
-                v = -v
+            y = min(int(y * rh), rh-1)
+            x = min(int(x * rw), rw-1)
             
-            image = image.rotate(v)
-        return image, mask
+            click_mask[y, x] = click['class_index']
+
+        if self.zoom_factor > 1:
+            click_mask = cv2.resize(click_mask, (w, h), interpolation=cv2.INTER_NEAREST)
+        
+        click_mask = Image.fromarray(click_mask)
+        output_dict['mask'] = click_mask
+        return output_dict
 
     def __repr__(self):
-        return 'Rotate (p={})'.format(self.p)
-
-class ShearX:
-    def __init__(self, p=0.5, max_v=0.3, fix=False):
-        self.p = p
-
-        self.min_v = max_v if fix else 0
-        self.max_v = max_v
-    
-    def __call__(self, image, mask=None):
-        if np.random.rand() <= self.p:
-
-            v = np.random.uniform(self.min_v, self.max_v)
-            if np.random.rand() <= 0.5:
-                v = -v
-            
-            image = image.transform(image.size, Image.AFFINE, (1, v, 0, 0, 1, 0))
-        return image, mask
-
-    def __repr__(self):
-        return 'ShearX (p={})'.format(self.p)
-
-class ShearY:
-    def __init__(self, p=0.5, max_v=0.3, fix=False):
-        self.p = p
-
-        self.min_v = max_v if fix else 0
-        self.max_v = max_v
-    
-    def __call__(self, image, mask=None):
-        if np.random.rand() <= self.p:
-
-            v = np.random.uniform(self.min_v, self.max_v)
-            if np.random.rand() <= 0.5:
-                v = -v
-            
-            image = image.transform(image.size, Image.AFFINE, (1, 0, 0, v, 1, 0))
-        return image, mask
-
-    def __repr__(self):
-        return 'ShearY (p={})'.format(self.p)
-
-class TranslateXabs:
-    def __init__(self, p=0.5, max_v=100, fix=False):
-        self.p = p
-
-        self.min_v = max_v if fix else 0
-        self.max_v = max_v
-    
-    def __call__(self, image, mask=None):
-        if np.random.rand() <= self.p:
-
-            v = np.random.randint(self.min_v, self.max_v + 1)
-            if np.random.rand() <= 0.5:
-                v = -v
-            
-            image = image.transform(image.size, Image.AFFINE, (1, 0, v, 0, 1, 0))
-        return image, mask
-
-    def __repr__(self):
-        return 'TranslateXabs (p={})'.format(self.p)
-
-class TranslateYabs:
-    def __init__(self, p=0.5, max_v=100, fix=False):
-        self.p = p
-
-        self.min_v = max_v if fix else 0
-        self.max_v = max_v
-    
-    def __call__(self, image, mask=None):
-        if np.random.rand() <= self.p:
-
-            v = np.random.randint(self.min_v, self.max_v + 1)
-            if np.random.rand() <= 0.5:
-                v = -v
-            
-            image = image.transform(image.size, Image.AFFINE, (1, 0, 0, 0, 1, v))
-        return image, mask
-
-    def __repr__(self):
-        return 'TranslateYabs (p={})'.format(self.p)
+        return 'Click2Mask()'

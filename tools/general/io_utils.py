@@ -1,10 +1,14 @@
-# Copyright (C) 2021 * Ltd. All rights reserved.
+# Copyright (C) 2022 * Ltd. All rights reserved.
 # author : Sanghyun Jo <shjo.april@gmail.com>
 
 import os
+import socket
 import argparse
 
 import numpy as np
+
+def get_hostname():
+    return socket.gethostname()
 
 def get_digits_in_number(number):
     count = 0
@@ -28,6 +32,9 @@ def boolean(v):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
+def list_type(v):
+    return list(map(float, v.split()))
+
 class Parser:
     def __init__(self):
         self.parser = argparse.ArgumentParser()
@@ -35,6 +42,9 @@ class Parser:
     def add(self, tag, default, type):
         if type == bool:
             type = boolean
+        
+        # if type == list:
+        #     type = list_type
         
         self.parser.add_argument(f'--{tag}', default=default, type=type)
 
@@ -51,28 +61,3 @@ class Parser:
     
     def get_args(self):
         return self.parser.parse_args()
-
-class Average_Meter:
-    def __init__(self, keys):
-        self.keys = keys
-        self.clear()
-    
-    def add(self, dic):
-        for key, value in dic.items():
-            self.data_dic[key].append(value)
-
-    def get(self, keys=None, clear=False):
-        if keys is None:
-            keys = self.keys
-        
-        dataset = [float(np.mean(self.data_dic[key])) for key in keys]
-        if clear:
-            self.clear()
-
-        if len(dataset) == 1:
-            dataset = dataset[0]
-            
-        return dataset
-    
-    def clear(self):
-        self.data_dic = {key : [] for key in self.keys}

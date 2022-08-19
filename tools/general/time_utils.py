@@ -1,12 +1,17 @@
-# Copyright (C) 2021 * Ltd. All rights reserved.
+# Copyright (C) 2022 * Ltd. All rights reserved.
 # author : Sanghyun Jo <shjo.april@gmail.com>
 
 import time
+import datetime
 
-def get_today():
-    now = time.localtime()
-    s = "%04d-%02d-%02d-%02dh%02dm%02ds" % (now.tm_year, now.tm_mon, now.tm_mday, now.tm_hour, now.tm_min, now.tm_sec)
-    return s
+def convert_sec2time(seconds):
+    minutes = seconds // 60
+    hours = minutes // 60
+
+    minutes = minutes % 60
+    seconds = seconds % 60
+
+    return '{:02d}:{:02d}:{:02d}'.format(hours, minutes, seconds)
 
 class Timer:
     def __init__(self):
@@ -18,7 +23,7 @@ class Timer:
     def tik(self):
         self.start_time = time.time()
     
-    def tok(self, ms = False, clear=False):
+    def tok(self, ms: bool=False, clear: bool=False):
         self.end_time = time.time()
         
         if ms:

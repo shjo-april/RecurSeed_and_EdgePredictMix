@@ -4,19 +4,14 @@ import numpy as np
 from torch import nn
 from torch.nn import functional as F
 
-#
-# Helper modules
-#
 class LocalAffinity(nn.Module):
-
     def __init__(self, dilations=[1]):
-        super(LocalAffinity, self).__init__()
-        self.dilations = dilations
-        weight = self._init_aff()
-        self.register_buffer('kernel', weight)
+        super().__init__()
 
+        self.dilations = dilations
+        self.kernel = self._init_aff()
+    
     def _init_aff(self):
-        # initialising the shift kernel
         weight = torch.zeros(8, 1, 3, 3)
 
         for i in range(weight.size(0)):
@@ -33,14 +28,10 @@ class LocalAffinity(nn.Module):
         weight[6, 0, 2, 1] = -1
         weight[7, 0, 2, 2] = -1
 
-        self.weight_check = weight.clone()
-
         return weight
 
     def forward(self, x):
-        
-        self.weight_check = self.weight_check.type_as(x)
-        assert torch.all(self.weight_check.eq(self.kernel))
+        self.kernel = self.kernel.type_as(x)
 
         B,K,H,W = x.size()
         x = x.view(B*K,1,H,W)
@@ -54,10 +45,8 @@ class LocalAffinity(nn.Module):
         x_aff = torch.cat(x_affs, 1)
         return x_aff.view(B,K,-1,H,W)
 
-class LocalAffinityCopy(LocalAffinity):
-
+class LocalIdentity(LocalAffinity):
     def _init_aff(self):
-        # initialising the shift kernel
         weight = torch.zeros(8, 1, 3, 3)
 
         weight[0, 0, 0, 0] = 1
@@ -71,11 +60,9 @@ class LocalAffinityCopy(LocalAffinity):
         weight[6, 0, 2, 1] = 1
         weight[7, 0, 2, 2] = 1
 
-        self.weight_check = weight.clone()
         return weight
 
-class LocalStDev(LocalAffinity):
-
+class LocalStd(LocalAffinity):
     def _init_aff(self):
         weight = torch.zeros(9, 1, 3, 3)
         weight.zero_()
@@ -92,54 +79,54 @@ class LocalStDev(LocalAffinity):
         weight[7, 0, 2, 1] = 1
         weight[8, 0, 2, 2] = 1
 
-        self.weight_check = weight.clone()
         return weight
-
+    
     def forward(self, x):
-        # returns (B,K,P,H,W), where P is the number
-        # of locations
-        x = super(LocalStDev, self).forward(x)
-
-        return x.std(2, keepdim=True)
+        x = super().forward(x)
+        x = x.std(dim=2, keepdim=True)
+        return x
 
 class LocalAffinityAbs(LocalAffinity):
-
     def forward(self, x):
-        x = super(LocalAffinityAbs, self).forward(x)
-        return torch.abs(x)
+        x = super().forward(x)
+        x = torch.abs(x)
+        return x
 
-#
-# PAMR module
-#
 class PAMR(nn.Module):
-
-    def __init__(self, num_iter=1, dilations=[1]):
-        super(PAMR, self).__init__()
+    def __init__(self, num_iter=1, dilations=[1], sigma=0.1):
+        super().__init__()
 
         self.num_iter = num_iter
-        self.aff_x = LocalAffinityAbs(dilations)
-        self.aff_m = LocalAffinityCopy(dilations)
-        self.aff_std = LocalStDev(dilations)
+        self.sigma = sigma
+        self.eps = 1e-8 # to avoid saturation
 
-    def forward(self, x, mask):
-        # mask = F.interpolate(mask, size=x.size()[-2:], mode="bilinear", align_corners=True)
+        self.aff_abs = LocalAffinityAbs(dilations)
+        self.aff_std = LocalStd(dilations)
+        self.aff_ide = LocalIdentity(dilations)
 
-        # x: [BxKxHxW]
-        # mask: [BxCxHxW]
+    def forward(self, x, m):
+        distance = self.aff_abs(x)
+        std = self.aff_std(x)
+
+        # distance.size() = torch.Size([1, 3, 48, 256, 383])
+        # std.size() = torch.Size([1, 3, 1, 256, 383])
+
+        # print(distance.size())
+        # print(std.size())
         
-        # B,K,H,W = x.size()
-        # _,C,_,_ = mask.size()
+        aff = -distance / (self.sigma * std + self.eps)
+        aff = torch.mean(aff, dim=1, keepdim=True)
+        aff = torch.softmax(aff, dim=2)
 
-        x_std = self.aff_std(x)
-        
-        x = -self.aff_x(x) / (1e-8 + 0.1 * x_std)
-        x = x.mean(1, keepdim=True)
-        x = F.softmax(x, 2)
+        # aff.size() = torch.Size([1, 1, 48, 256, 383])
+        # mask.size() = torch.Size([1, K, 256, 383])
+
+        # print(aff.size())
+        # print(mask.size())
 
         for _ in range(self.num_iter):
-            m = self.aff_m(mask)  # [BxCxPxHxW]
-            mask = (m * x).sum(2)
-
-        # xvals: [BxCxHxW]
-        return mask
-
+            # m.size() = torch.Size([1, K, 48, 256, 383])
+            m = self.aff_ide(m)
+            m = (aff * m).sum(dim=2)
+        
+        return m

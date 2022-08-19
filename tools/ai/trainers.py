@@ -1,170 +1,192 @@
-# Copyright (C) 2021 * Ltd. All rights reserved.
+# Copyright (C) 2022 * Ltd. All rights reserved.
 # author : Sanghyun Jo <shjo.april@gmail.com>
 
 import sys
 import torch
+import numpy as np
+
+from typing import List
+from dataclasses import dataclass
 
 from torch.utils.tensorboard import SummaryWriter
 
-from tools.ai import optimizers
-from tools.general import io_utils, time_utils
+from .torch_utils import set_seed, ModelEMA, de_parallel, save_model
+from ..general import io_utils, time_utils
 
-class Trainer:
-    def __init__(self, 
-            model, losses, log_names,
+@dataclass
+class Parameter:
+    seed: int
 
-            loader, max_epochs,  
-            
-            optimizer, optimizer_option,
-            scheduler, scheduler_option,
-            
-            amp, ema, tensorboard_dir,
+    use_ema: bool
+    ema_decay: float
 
-            device, RANK, WORLD_SIZE
-        ):
+    max_epochs: int
+    tensorboard_dir: str
+
+    # for ddp
+    RANK: int
+
+class BaseTrainer:
+    """
+    1. prepare_dataset
+    2. prepare_loader
+    3. configure_optimizers
+    4. training step
+    5. evaluation step
+    """
+    def __init__(self, model, device, param: Parameter):
+        self.param = param
+        self.device = device
 
         self.model = model
-        self.loader = loader
-        self.log_names = log_names
+        self.param_groups = self.model.get_parameter_groups()
 
-        self.max_epochs = max_epochs
-        
-        self.num_iterations = len(self.loader)
-        self.max_iterations = self.num_iterations * self.max_epochs
-        
-        if scheduler == 'StepLR':
-            scheduler_option['milestones'] = [milestone * self.num_iterations for milestone in scheduler_option['milestones']]
-        
-        if scheduler in ['StepLR', 'CosineLR']:
-            scheduler_option['warmup_iterations'] *= self.num_iterations
-        
-        scheduler_option['max_iterations'] = self.max_iterations
-        optimizer_option['scheduler_option'] = scheduler_option
-        
-        if optimizer == 'SGD':
-            self.optimizer = optimizers.SGD(**optimizer_option)
-        elif optimizer == 'AdamW':
-            del optimizer_option['momentum']
-            del optimizer_option['nesterov']
-            self.optimizer = optimizers.AdamW(**optimizer_option)
+        set_seed(self.param.seed)
 
-        self.amp = amp
-        self.ema = ema
+        self.prepare_dataset()
+        self.prepare_loader()
 
-        self.losses = losses
-
+        # set variables
         self.epoch = 1
         self.iteration = 1
 
+        self.best_valid_score = 0
+
+        self.train_iterations = len(self.train_loader)
+        self.valid_iterations = len(self.valid_loader)
+
+        ep_digits = io_utils.get_digits_in_number(self.param.max_epochs)
+        ni_digits = io_utils.get_digits_in_number(self.train_iterations)
+
+        self.progress = '\rEpoch=%0{}d [%s] [%0{}d/%0{}d]'.format(ep_digits, ni_digits, ni_digits)
+
+        self.configure_optimizers()
+
+        self.evaluator = None 
+        self.writer = SummaryWriter(self.param.tensorboard_dir)
+        
         self.train_timer = time_utils.Timer()
-        self.train_meter = io_utils.Average_Meter(self.log_names)
-        
-        if RANK in [-1, 0]:
-            self.writer = SummaryWriter(tensorboard_dir)
-        
-        if self.amp:
-            self.scaler = torch.cuda.amp.GradScaler(enabled=True)
-        
-        self.device = device
+        self.valid_timer = time_utils.Timer()
 
-        # for ddp
-        self.RANK = RANK
-        self.WORLD_SIZE = WORLD_SIZE
+        # for ema
+        self.ema = None
+        if self.param.use_ema:
+            self.ema = ModelEMA(self.model, decay=self.param.ema_decay)
+
+    # Related to dataset
+    def prepare_dataset(self):
+        self.train_datset = None
+        self.valid_dataset = None
     
-    def calculate_losses(self, images, labels):
-        raise NotImplementedError
-    
-    def update_tensorboard(self, losses, param_dict):
-        raise NotImplementedError
+    def prepare_loader(self):
+        self.train_loader = None
+        self.valid_loader = None
 
-    def update_ema(self):
-        if self.ema is not None:
-            # print('# update ema')
-            self.ema.update(self.model)
+    def configure_optimizers(self):
+        self.optimizer = None
+        self.scheduler = None
 
-    def preprocess(self, data):
-        data['images'] = data['images'].to(self.device)
-        data['labels'] = data['labels'].to(self.device)
-        return data
-
-    def initialize_generator(self):
-        self.generator = self.loader
-
-    def save(self, path):
+    # Related to checkpoints
+    def save(self, checkpoint_path: str):
         torch.save(
             {
+                'epoch': self.epoch,
+                'iteration': self.iteration,
                 'model': self.model.state_dict(),
                 'ema': self.ema.get_model().state_dict(),
-                'optimizer': self.optimizer.state_dict()
-            }, path
+                'optimizer': self.optimizer.state_dict(),
+            }, checkpoint_path
         )
+    
+    def load(self, checkpoint_path: str):
+        state_dict = torch.load(checkpoint_path)
 
-    def load(self, path):
-        state_dict = torch.load(path)
+        self.epoch = state_dict['epoch']
+        self.iteration = state_dict['iteration']
 
         self.model.load_state_dict(state_dict['model'])
         self.ema.get_model().load_state_dict(state_dict['ema'])
         self.optimizer.load_state_dict(state_dict['optimizer'])
-
-    def step(self, debug=False):
+    
+    # Related to training and evaluation
+    def forward(self, data, training: bool=True):
+        raise NotImplementedError
+    
+    def training_step(self, debug=False):
         self.train_timer.tik()
+        if self.param.RANK != -1:
+            self.train_loader.sampler.set_epoch(self.epoch)
         
-        ep_digits = io_utils.get_digits_in_number(self.max_epochs)
-        ni_digits = io_utils.get_digits_in_number(self.num_iterations)
+        data_dict = {}
 
-        progress_format = '\r# Epoch = %0{}d, [%0{}d/%0{}d] = %02.2f%%, Lr = %.6f, Loss = %.4f\t\t'.format(ep_digits, ni_digits, ni_digits)
+        for i, data in enumerate(self.train_loader):
+            loss, tb_dict = self.forward(data, training=True)
 
-        self.initialize_generator()
-        
-        for i, data in enumerate(self.loader):
-            i += 1
+            # add data in dictionary
+            for key in tb_dict.keys():
+                if not key in data_dict:
+                    data_dict[key] = []
+                    
+                data_dict[key].append(tb_dict[key])
             
-            # preprocess
-            data = self.preprocess(data)
-            
-            # infer 
-            losses, param_dict = self.calculate_losses(data)
-            
-            # multiply weights for averaging DDP
-            # if self.RANK != -1:
-            #     losses[0] *= self.WORLD_SIZE
-            
-            # update weights 
+            # update weights with gradients
             self.optimizer.zero_grad()
-            
-            if self.amp:
-                self.scaler.scale(losses[0]).backward()
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-            else:
-                losses[0].backward()
-                self.optimizer.step()
-                
-            self.update_ema()
-            
-            # update meter
-            self.train_meter.add({name:loss.item() for name, loss in zip(self.log_names, losses)})
-            
-            # show log
-            if self.RANK in [-1, 0]:
-                sys.stdout.write(progress_format%(self.epoch, i, self.num_iterations, i / self.num_iterations * 100, self.get_learning_rate(), losses[0].item()))
+            loss.backward()
+            self.optimizer.step()
+
+            # update ema
+            if self.param.RANK in [-1, 0]:
+                self.update_ema()
+
+            # update tensorboard
+            if self.iteration % 10 == 0:
+                self.update_tensorboard(tb_dict)
+
+            if self.param.RANK in [-1, 0]:
+                # self.update_ema()
+
+                sys.stdout.write(self.progress%(self.epoch, 'train', i+1, self.train_iterations) + ' Loss={:.4f}'.format(loss.item()))
                 sys.stdout.flush()
 
-                # update tensorboard
-                if self.iteration % 10 == 0:
-                    self.update_tensorboard(losses, param_dict)
-            
             self.iteration += 1
+
             if debug:
                 break
-        
-        print('\r', end='')
-        self.epoch += 1
-        
-        return self.train_meter.get(clear=True), self.train_timer.tok(clear=True)
 
-    def get_writer(self):
-        return self.writer
+        print('\r', end='')
+
+        self.epoch += 1
+
+        for key in data_dict.keys():
+            data_dict[key] = np.mean(data_dict[key])
+
+        data_dict['time'] = self.train_timer.tok()
+
+        return data_dict
+    
+    def evaluation_step(self, debug=False):
+        self.valid_timer.tik()
+
+        for i, data in enumerate(self.valid_loader):
+            eval_dict = self.forward(data, training=False)
+            
+            self.evaluator.add(eval_dict)
+
+            if self.param.RANK in [-1, 0]:
+                sys.stdout.write(self.progress%(self.epoch-1, 'validation', i+1, self.valid_iterations))
+                sys.stdout.flush()
+
+            if debug:
+                break
+
+        print('\r', end='')
+        
+        return self.valid_timer.tok()
+    
+    # Related to parameters
+    def update_ema(self):
+        if self.ema is not None:
+            self.ema.update(self.model)
     
     def get_learning_rate(self, option='first'):
         lr_list = [group['lr'] for group in self.optimizer.param_groups]
@@ -177,3 +199,15 @@ class Trainer:
             return lr_list[0]
         else:
             return lr_list
+    
+    def update_tensorboard(self, tb_dict: dict):
+        for key in tb_dict.keys():
+            self.writer.add_scalar(key, tb_dict[key], self.iteration)
+
+    def save_model(self, path):
+        if self.param.use_ema:
+            model = self.ema.get_model()
+        else:
+            model = de_parallel(self.model)
+
+        save_model(model, path)

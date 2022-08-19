@@ -1,4 +1,4 @@
-# Copyright (C) 2021 * Ltd. All rights reserved.
+# Copyright (C) 2022 * Ltd. All rights reserved.
 # author : Sanghyun Jo <shjo.april@gmail.com>
 
 import math
@@ -24,14 +24,6 @@ def normalize(x, eps=1e-5):
     C, H, W = x.size()
     max_x = x.view(C, (H * W)).max(dim=1)[0].view(C, 1, 1)
     return x / (max_x + eps)
-
-def interleave(x, size):
-    s = list(x.shape)
-    return x.reshape([-1, size] + s[1:]).transpose(0, 1).reshape([-1] + s[1:])
-
-def de_interleave(x, size):
-    s = list(x.shape)
-    return x.reshape([size, -1] + s[1:]).transpose(0, 1).reshape([-1] + s[1:])
 
 def resize(tensors, size=None, scale=1.0, mode='bilinear', align_corners=False):
     without_batch = len(tensors.size()) == 3
@@ -71,52 +63,6 @@ def one_hot_embedding(label, classes):
     vector = np.zeros((classes), dtype = np.float32)
     vector[label] = 1.
     return vector
-
-def apply_super_pixel(f: torch.FloatTensor, sp_map: torch.LongTensor, mode='min', device='cpu'):
-    """
-    # match width and height of feature and super-pixel maps.
-    _, h, w = f.size()
-    h_of_sp, w_of_sp = sp_map.size()
-
-    if h != h_of_sp or w != w_of_sp:
-        sp_map = sp_map.float()
-        sp_map = resize(sp_map.unsqueeze(0), (h, w), mode='nearest', align_corners=None)[0]
-        sp_map = sp_map.long()
-    """
-
-    # indices to one-hot vectors
-    n_segments = sp_map.max() + 1
-    onehot = torch.eye(n_segments).cuda()
-    
-    if device == 'cpu':
-        f = f.cpu()
-        onehot = onehot.cpu()
-
-    sp_map = onehot[sp_map].permute(2, 0, 1)
-
-    # NxCxHxW = Nx1xHxW * 1xCxHxW
-    f = f.unsqueeze(0)
-    sp_map = sp_map.unsqueeze(1)
-
-    matrix = f * sp_map
-    
-    if mode == 'max':
-        sp_f = sp_map * F.adaptive_max_pool2d(matrix, (1, 1))
-    
-    elif mode == 'mean':
-        N, C, H, W = matrix.size()
-
-        sum_values = matrix.reshape(N, C, H * W).sum(dim=2).reshape(N, C, 1, 1)
-        mean_values = sum_values / sp_map.reshape(N, 1, H * W).sum(dim=2).reshape(N, 1, 1, 1)
-
-        sp_f = sp_map * mean_values
-
-    elif mode == 'min':
-        sp_f = sp_map * matrix.min(-2, keepdim=True)[0].min(-1, keepdim=True)[0]
-    
-    sp_f = torch.max(sp_f, dim=0)[0]
-    
-    return sp_f
 
 def calculate_parameters(model):
     return sum(param.numel() for param in model.parameters())/1000000.0
@@ -163,6 +109,7 @@ class ModelEMA:
         #     self.ema.half()  # FP16 EMA
         self.updates = updates  # number of EMA updates
         self.decay = lambda x: decay * (1 - math.exp(-x / 2000))  # decay exponential ramp (to help early epochs)
+        
         for p in self.ema.parameters():
             p.requires_grad_(False)
     
@@ -177,7 +124,7 @@ class ModelEMA:
                 if v.dtype.is_floating_point:
                     v *= d
                     v += (1. - d) * msd[k].detach()
-
+    
     def get_model(self):
         return self.ema
     
