@@ -8,12 +8,6 @@ This repository is the official implementation of "RecurSeed and EdgePredictMix:
 # Citation
 - Please cite our paper if the code is helpful to your research. [arxiv](https://arxiv.org/abs/2204.06754)
 ```
-@article{jo2022recurseed,
-  title={RecurSeed and EdgePredictMix: Single-stage Learning is Sufficient for Weakly-Supervised Semantic Segmentation},
-  author={Jo, Sanghyun and Yu, In-Jae and Kim, Kyungsu},
-  journal={arXiv preprint arXiv:2204.06754},
-  year={2022}
-}
 ```
 
 ### Abstract
@@ -26,6 +20,8 @@ Although weakly-supervised semantic segmentation using only image-level labels (
 [04/14/2022] Released "RecurSeed and CertainMix" for testing.
 
 [08/19/2022] Released "RecurSeed and EdgePredictMix" for testing.
+
+[10/18/2022] Released additional results such as pseudo labels and DeepLabv2.
 
 # Setup
 
@@ -93,12 +89,15 @@ The whole code and commands are under review and will release soon.
 
 # Evaluation
 
-Release our weights and official results (anonymous link).
+Release our weights, predicted masks, and official results (anonymous link).
 
-| Stage | Backbone | Pretrained weight            | VOC val | VOC test |
+| Stage | Backbone     | Pretrained weight            | VOC val | VOC test |
 |:-----:|:------------:|:----------------------------:|:-------:|:--------:|
 | single-stage | ResNet-50 | [weight](https://drive.google.com/file/d/17wcdksR3qdBNzVRIWBg4xC_3FgcLryht/view) | [link](http://host.robots.ox.ac.uk:8080/anonymous/LKO4IS.html) | [link](http://host.robots.ox.ac.uk:8080/anonymous/9MLLHH.html) |
-| multi-stage | ResNet-101 | [weight](https://drive.google.com/file/d/1w8GjZKc8tNFMOWqSEHumgdI9twXfq0ka/view?usp=sharing) | [link](http://host.robots.ox.ac.uk:8080/anonymous/SNDUAQ.html) | [link](http://host.robots.ox.ac.uk:8080/anonymous/HUHADT.html) |
+| multi-stage (DeepLabv2) | ResNet-101 | [weight](https://drive.google.com/file/d/1-k1M_H2hvCUaGJlos1T3ivqJ6G5y5dD-/view?usp=sharing) | [link](http://host.robots.ox.ac.uk:8080/anonymous/GO5RTP.html) [mask](https://drive.google.com/file/d/1iHJaEpJVa6G8l4Bd1rd8LKhGRNPX9rzB/view?usp=sharing) | [link](http://host.robots.ox.ac.uk:8080/anonymous/0D2TEN.html) [mask](https://drive.google.com/file/d/1QPAOI971N8q-xCL2lVM9lHLXPBc-zalg/view?usp=sharing) |
+| multi-stage (DeepLabv3+) | ResNet-101 | [weight](https://drive.google.com/file/d/1w8GjZKc8tNFMOWqSEHumgdI9twXfq0ka/view?usp=sharing) | [link](http://host.robots.ox.ac.uk:8080/anonymous/SNDUAQ.html) [mask](https://drive.google.com/file/d/1TZXmJm7UEO1u3uqss-GF2LyClUFc1amY/view?usp=sharing) | [link](http://host.robots.ox.ac.uk:8080/anonymous/HUHADT.html) [mask](https://drive.google.com/file/d/1PmuZ3wRirsvh09hCR1inpxhmkeoF0Id0/view?usp=sharing) |
+
+Release pseudo labels on PASCAL VOC 2012 dataset after applying a random walk with our single-stage method. [RS+EPM.zip](https://drive.google.com/file/d/1MwqpQQrD7ANOI3x-AlCoAWFQLnnpcU2W/view?usp=sharing)
 
 Below lines are testing commands to reproduce our method.
 
