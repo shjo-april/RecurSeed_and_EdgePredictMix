@@ -29,6 +29,8 @@ Although weakly-supervised semantic segmentation using only image-level labels (
 
 [10/18/2022] Released additional results such as pseudo labels and DeepLabv2.
 
+[01/26/2023] Released additional weights trained on the COCO 2014 dataset and updating citation.
+
 # Setup
 
 Setting up for this project involves installing dependencies and preparing datasets. The code is tested on Ubuntu 20.04 with NVIDIA GPUs and CUDA installed. 
