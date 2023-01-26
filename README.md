@@ -8,6 +8,12 @@ This repository is the official implementation of "RecurSeed and EdgePredictMix:
 # Citation
 - Please cite our paper if the code is helpful to your research. [arxiv](https://arxiv.org/abs/2204.06754)
 ```
+@article{jo2022recurseed,
+  title={RecurSeed and EdgePredictMix: Single-stage Learning is Sufficient for Weakly-Supervised Semantic Segmentation},
+  author={Jo, Sanghyun and Yu, In-Jae and Kim, Kyungsu},
+  journal={arXiv preprint arXiv:2204.06754},
+  year={2022}
+}
 ```
 
 ### Abstract
