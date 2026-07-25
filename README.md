@@ -5,6 +5,8 @@
 # RecurSeed and EdgePredictMix
 This repository is the official implementation of "RecurSeed and EdgePredictMix: Single-stage learning is sufficient for Weakly-Supervised Semantic Segmentation". Please feel free to reach out for any questions or discussions.
 
+> 📢 **News:** Our follow-up work, [MARS: Model-agnostic Biased Object Removal without Additional Supervision for Weakly-Supervised Semantic Segmentation](https://github.com/shjo-april/MARS) (ICCV 2023), builds on RS+EPM and is now publicly available with its complete implementation.
+
 # Citation
 - Please cite our paper if the code is helpful to your research. [arxiv](https://arxiv.org/abs/2204.06754)
 ```
@@ -23,13 +25,15 @@ Although weakly-supervised semantic segmentation using only image-level labels (
 
 # Update
 
-[04/14/2022] Released "RecurSeed and CertainMix" for testing.
+[07/25/2026] Released the complete implementation of RS+EPM (training, inference, and evaluation). We sincerely apologize for the long delay in releasing the code, which was due to company commitments.
 
-[08/19/2022] Released "RecurSeed and EdgePredictMix" for testing.
+[01/26/2023] Released additional weights trained on the COCO 2014 dataset and updating citation.
 
 [10/18/2022] Released additional results such as pseudo labels and DeepLabv2.
 
-[01/26/2023] Released additional weights trained on the COCO 2014 dataset and updating citation.
+[08/19/2022] Released "RecurSeed and EdgePredictMix" for testing.
+
+[04/14/2022] Released "RecurSeed and CertainMix" for testing.
 
 # Setup
 
@@ -47,16 +51,16 @@ python3 -m pip install -r requirements.txt
 Please download following VOC and COCO datasets. Each dataset has a different directory structure. Therefore, we modify directory structures of all datasets for a comfortable implementation. 
 
 > ##### 1. PASCAL VOC 2012
-> Download PASCAL VOC 2012 dataset from our [[Google Drive](https://drive.google.com/file/d/1dkwHjd-r4Xe4ap0PWNMn0GRnekIrEKyQ/view?usp=sharing)].
+> Download PASCAL VOC 2012 dataset from our [[Google Drive](https://drive.google.com/file/d/1ITnF19LayDdC1QYUki1guta82L9qSrGo/view?usp=sharing)].
 
 > ##### 2. MS COCO 2014
-> Download MS COCO 2014 dataset from our [[Google Drive](https://drive.google.com/file/d/1Nn2zsJg3L52xYo40s3nx_EeUNAa4RULf/view)].
+> Download MS COCO 2014 dataset from our [[Google Drive](https://drive.google.com/file/d/1WwcK-33wHpGw4cozEi7hkmpI0GuYoPEc/view?usp=sharing)].
 
 Create a directory "../VOC2012/" for storing the dataset and appropriately place each dataset to have the following directory structure.
 ```
     ../                               # parent directory
     ├── ./                            # current (project) directory
-    │   ├── core/                     # (dir.) implementation of RecurSeed and CertainMix
+    │   ├── core/                     # (dir.) implementation of RecurSeed and EdgePredictMix
     │   ├── data/                     # (dir.) information per dataset (including class names and the number of classes)
     │   ├── tools/                    # (dir.) helper functions
     │   ├── README.md                 # intstruction for a reproduction
@@ -90,10 +94,73 @@ Create a directory "../VOC2012/" for storing the dataset and appropriately place
 ```
 
 # Visualization
-We prepared [a jupyter notebook](https://github.com/OFRIN/RecurSeed_and_EdgePredictMix/blob/master/demo.ipynb) for visualization.
+We prepared [a jupyter notebook](https://github.com/shjo-april/RecurSeed_and_EdgePredictMix/blob/master/demo.ipynb) for visualization.
 
 # Training
-The whole code and commands are under review and will release soon.
+Below lines are training commands to reproduce our method.
+
+### 1. RecurSeed and EdgePredictMix (single-stage)
+Training takes approx. 24 hours until convergence (trained with a single RTX A6000 GPU).
+
+```bash
+# Train our single-stage method with RecurSeed and EdgePredictMix.
+
+# 1. PASCAL VOC 2012
+python3 train_rsepm.py \
+--gpus 0 --root_dir ../VOC2012/ --dataset VOC --train_domain train_aug \
+--backbone resnet50 --tag ResNet50@VOC@RS+EPM
+
+# 2. MS COCO 2014
+python3 train_rsepm.py \
+--gpus 0 --root_dir ../COCO2014/ --dataset COCO --train_domain train \
+--backbone resnet50 --tag ResNet50@COCO@RS+EPM
+```
+
+### 2. AffinityNet For Random Walk (multi-stage)
+We apply a random walk for improving the quality of pseudo masks.
+Additionally, we implemented a random walk refer to [this repository](https://github.com/jiwoon-ahn/irn). 
+
+```bash
+# Generate initial seeds produced from our single-stage method.
+python3 infer_rsepm.py \
+--gpus 2 --root_dir ../VOC2012/ --dataset VOC --domain train_aug \
+--backbone resnet50 --tag ResNet50@VOC@RS+EPM@Official
+
+# Convert initial seeds to affinity labels for training AffinityNet.
+python3 convert_seed_to_affinity_labels.py \
+--root_dir ../VOC2012/ --dataset VOC --domain train_aug \
+--tag ResNet50@VOC@RS+EPM@Official
+
+# Train AffinityNet for a random walk.
+python3 train_aff.py \
+--gpus 1 --root_dir ../VOC2012/ --dataset VOC --train_domain train_aug \
+--backbone resnet50 --tag ResNet50@VOC@AffinityNet \
+--pseudo_tag ResNet50@VOC@RS+EPM@Official
+```
+
+### 3. Final Segmentation Model (multi-stage)
+Additionally, we implemented DeepLabv2 and DeepLabv3+ refer to [this repository](https://github.com/rulixiang/deeplab-pytorch).
+
+```bash
+# Apply RW for improving the quality of single-stage results.
+python3 infer_rw.py \
+--gpus 3 --root_dir ../VOC2012/ --dataset VOC --domain train_aug \
+--backbone resnet50 --aff_tag ResNet50@VOC@AffinityNet \
+--seg_tag ResNet50@VOC@RS+EPM@Official
+
+# Convert initial seeds to pseudo masks for training final segmentation models.
+python3 convert_seed_to_pseudo_masks.py \
+--gpus 0 --root_dir ../VOC2012/ --dataset VOC --domain train_aug \
+--folder random_walk --tag ResNet50@VOC@RS+EPM@Official
+
+# Train DeepLabv3+ with pseudo masks.
+python3 train_seg.py \
+--gpus 1 --root_dir ../VOC2012/ --dataset VOC \
+--train_domain train_aug --valid_domain validation \
+--pseudo_tag ResNet50@VOC@RS+EPM@Official \
+--backbone resnet101 --decoder deeplabv3+ \
+--tag ResNet101@VOC@RS+EPM@MS
+```
 
 # Evaluation
 
@@ -101,14 +168,20 @@ Release our weights, predicted masks, and official results (anonymous link).
 
 | Stage | Backbone     | Pretrained weight            | VOC val | VOC test |
 |:-----:|:------------:|:----------------------------:|:-------:|:--------:|
-| single-stage | ResNet-50 | [weight](https://drive.google.com/file/d/17wcdksR3qdBNzVRIWBg4xC_3FgcLryht/view) | [link](http://host.robots.ox.ac.uk:8080/anonymous/LKO4IS.html) | [link](http://host.robots.ox.ac.uk:8080/anonymous/9MLLHH.html) |
+| single-stage | ResNet-50 | [weight](https://drive.google.com/file/d/1i-RenkUjqsiy05-GcwRFzXXRKkV9MICA/view?usp=sharing) | [link](http://host.robots.ox.ac.uk:8080/anonymous/LKO4IS.html) | [link](http://host.robots.ox.ac.uk:8080/anonymous/9MLLHH.html) |
 | multi-stage (DeepLabv2) | ResNet-101 | [weight](https://drive.google.com/file/d/1-k1M_H2hvCUaGJlos1T3ivqJ6G5y5dD-/view?usp=sharing) | [link](http://host.robots.ox.ac.uk:8080/anonymous/GO5RTP.html) [mask](https://drive.google.com/file/d/1iHJaEpJVa6G8l4Bd1rd8LKhGRNPX9rzB/view?usp=sharing) | [link](http://host.robots.ox.ac.uk:8080/anonymous/0D2TEN.html) [mask](https://drive.google.com/file/d/1QPAOI971N8q-xCL2lVM9lHLXPBc-zalg/view?usp=sharing) |
-| multi-stage (DeepLabv3+) | ResNet-101 | [weight](https://drive.google.com/file/d/1w8GjZKc8tNFMOWqSEHumgdI9twXfq0ka/view?usp=sharing) | [link](http://host.robots.ox.ac.uk:8080/anonymous/SNDUAQ.html) [mask](https://drive.google.com/file/d/1TZXmJm7UEO1u3uqss-GF2LyClUFc1amY/view?usp=sharing) | [link](http://host.robots.ox.ac.uk:8080/anonymous/HUHADT.html) [mask](https://drive.google.com/file/d/1PmuZ3wRirsvh09hCR1inpxhmkeoF0Id0/view?usp=sharing) |
+| multi-stage (DeepLabv3+) | ResNet-101 | [weight](https://drive.google.com/file/d/1Z5zOC0mXIqVL4umUcfujoMuirFfiieup/view?usp=sharing) | [link](http://host.robots.ox.ac.uk:8080/anonymous/SNDUAQ.html) [mask](https://drive.google.com/file/d/1TZXmJm7UEO1u3uqss-GF2LyClUFc1amY/view?usp=sharing) | [link](http://host.robots.ox.ac.uk:8080/anonymous/HUHADT.html) [mask](https://drive.google.com/file/d/1PmuZ3wRirsvh09hCR1inpxhmkeoF0Id0/view?usp=sharing) |
 | multi-stage (DeepLabv3+, COCO) | ResNet-101 | [weight](https://drive.google.com/file/d/1UwGM_0P-eR6O1T8ydRdxvBPHZiZ6eJHO/view?usp=share_link) | - | - |
 
 Release pseudo labels on PASCAL VOC 2012 dataset after applying a random walk with our single-stage method. [RS+EPM.zip](https://drive.google.com/file/d/1MwqpQQrD7ANOI3x-AlCoAWFQLnnpcU2W/view?usp=sharing)
 
 Below lines are testing commands to reproduce our method.
+
+Before running the testing commands, download the official checkpoints ([ResNet50@VOC@RS+EPM@Official.zip](https://drive.google.com/file/d/1i-RenkUjqsiy05-GcwRFzXXRKkV9MICA/view?usp=sharing) and [ResNet101@VOC@RS+EPM@MS@Official.zip](https://drive.google.com/file/d/1Z5zOC0mXIqVL4umUcfujoMuirFfiieup/view?usp=sharing)) and extract each zip to have the following structure.
+```
+./experiments/models/ResNet50@VOC@RS+EPM@Official/last.pth
+./experiments/models/ResNet101@VOC@RS+EPM@MS@Official/last.pth
+```
 
 ### 1. Single-stage Results
 ```bash

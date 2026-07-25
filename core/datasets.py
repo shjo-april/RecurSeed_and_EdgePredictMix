@@ -2,6 +2,7 @@
 # author : Sanghyun Jo <shjo.april@gmail.com>
 
 from .abc_modules import Guide_For_Dataset
+from .affinity_utils import GetAffinityLabelFromIndices
 
 from tools.ai import torch_utils
 from tools.general import cv_utils
@@ -112,6 +113,27 @@ class Dataset_For_Analysis(Guide_For_Dataset):
             label = torch_utils.one_hot_embedding([self.class_dict[tag] - 1 for tag in data['tag']], self.num_classes - 1)
 
         return image_id, image, label, mask #, output_dict['edge']
+
+class Dataset_For_RW(Guide_For_Dataset):
+    def __init__(self, root_dir, domain, path_index, tag, transform, name='VOC', mask_dir='./experiments/'):
+        super().__init__(root_dir, domain, ['image', 'mask'], f'./data/{name}.json')
+
+        domain = 'train' if domain == 'train_aug' else domain
+
+        self.transform = transform
+        self.mask_dir = mask_dir + 'affinity-labels/{}/{}/'.format(tag, domain)
+
+        self.path_index = path_index
+        self.extract_aff_lab_func = GetAffinityLabelFromIndices(self.path_index.src_indices, self.path_index.dst_indices)
+
+    def __getitem__(self, index):
+        data = super().__getitem__(index)
+
+        input_dict = {'image': data['image'], 'mask':data['mask']}
+        output_dict = self.transform(input_dict)
+        image, mask = output_dict['image'], output_dict['mask']
+
+        return image, self.extract_aff_lab_func(mask)
 
 class Dataset_For_Segmentation(Guide_For_Dataset):
     def __init__(self, root_dir, domain, transform, tag=None, name='VOC', mask_dir='./experiments/'):
